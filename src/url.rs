@@ -1,8 +1,9 @@
+use crate::utils::parse_url_with_raw_path;
 use crate::{event_handlers::Handles, statistics::StatError::UrlFormat, Command::AddError};
 use anyhow::{anyhow, bail, Result};
 use reqwest::Url;
 use std::collections::HashSet;
-use std::{convert::TryInto, fmt, sync::Arc};
+use std::{fmt, sync::Arc};
 
 /// abstraction around target urls; collects all Url related shenanigans in one place
 #[derive(Debug)]
@@ -90,7 +91,7 @@ impl FeroxUrl {
             //
             // in order to resolve the issue, we check if the word from the wordlist is a parsable URL
             // and if so, don't do any further processing
-            let message = format!("word ({}) from wordlist is a URL, skipping...", word);
+            let message = format!("word ({word}) from wordlist is a URL, skipping...");
             log::warn!("{}", message);
             log::trace!("exit: format -> Err({})", message);
             bail!(message);
@@ -122,9 +123,9 @@ impl FeroxUrl {
             // We handle the special case of forward slash
             // That allow us to treat it as an extension with a particular format
             if ext == "/" {
-                format!("{}/", word)
+                format!("{word}/")
             } else {
-                format!("{}.{}", word, ext)
+                format!("{word}.{ext}")
             }
         } else {
             String::from(word)
@@ -142,60 +143,19 @@ impl FeroxUrl {
             word = word.trim_start_matches('/').to_string();
         };
 
-        let base_url = Url::parse(&url)?;
-        let joined = base_url.join(&word)?;
+        let base_url = parse_url_with_raw_path(&url)?;
+        let mut joined = base_url.join(&word)?;
 
-        if self.handles.config.queries.is_empty() {
-            // no query params to process
-            log::trace!("exit: format -> {}", joined);
-            Ok(joined)
-        } else {
-            let with_params =
-                Url::parse_with_params(joined.as_str(), &self.handles.config.queries)?;
-            log::trace!("exit: format_url -> {}", with_params);
-            Ok(with_params) // request with params attached
-        }
-    }
-
-    /// Gets the length of a url's path
-    pub fn path_length(&self) -> Result<u64> {
-        let parsed = Url::parse(&self.target)?;
-        Ok(FeroxUrl::path_length_of_url(&parsed))
-    }
-
-    /// Gets the length of a url's path
-    ///
-    /// example: http://localhost/stuff -> 5
-    pub fn path_length_of_url(url: &Url) -> u64 {
-        log::trace!("enter: get_path_length({})", url);
-
-        let path = url.path();
-
-        let segments = if let Some(split) = path.strip_prefix('/') {
-            split.split_terminator('/')
-        } else {
-            log::trace!("exit: get_path_length -> 0");
-            return 0;
-        };
-
-        if let Some(last) = segments.last() {
-            // failure on conversion should be very unlikely. While a usize can absolutely overflow a
-            // u64, the generally accepted maximum for the length of a url is ~2000.  so the value we're
-            // putting into the u64 should never realistically be anywhere close to producing an
-            // overflow.
-            // usize max: 18,446,744,073,709,551,615
-            // u64 max:   9,223,372,036,854,775,807
-            let url_len: u64 = last
-                .len()
-                .try_into()
-                .expect("Failed usize -> u64 conversion");
-
-            log::trace!("exit: get_path_length -> {}", url_len);
-            return url_len;
+        if !self.handles.config.queries.is_empty() {
+            // if called, this adds a '?' to the url, whether or not there are queries to be added
+            // so we need to check if there are queries to be added before blindly adding the '?'
+            joined
+                .query_pairs_mut()
+                .extend_pairs(self.handles.config.queries.iter());
         }
 
-        log::trace!("exit: get_path_length -> 0");
-        0
+        log::trace!("exit: format_url -> {}", joined);
+        Ok(joined)
     }
 
     /// Simple helper to abstract away adding a forward-slash to a url if not present
@@ -230,7 +190,7 @@ impl FeroxUrl {
 
         let target = self.normalize();
 
-        let parsed = Url::parse(&target)?;
+        let parsed = parse_url_with_raw_path(&target)?;
         let parts = parsed
             .path_segments()
             .ok_or_else(|| anyhow!("No path segments found"))?;
@@ -310,7 +270,7 @@ mod tests {
         let pdf = Url::parse("http://localhost/turbo.pdf").unwrap();
         let tar = Url::parse("http://localhost/turbo.tar.gz").unwrap();
 
-        let expected = vec![
+        let expected = [
             vec![base.clone(), js.clone()],
             vec![base.clone(), js.clone(), php.clone()],
             vec![base.clone(), js.clone(), php.clone(), pdf.clone()],
@@ -483,7 +443,7 @@ mod tests {
         let handles = Arc::new(Handles::for_testing(None, None).0);
         let url = FeroxUrl::from_string("http://localhost", handles);
         for ext in ["rocks", "fun"] {
-            let to_check = format!("http://localhost/upload/ferox.{}", ext);
+            let to_check = format!("http://localhost/upload/ferox.{ext}");
             assert_eq!(
                 url.format("//upload/ferox", Some(ext)).unwrap(),
                 reqwest::Url::parse(&to_check[..]).unwrap()

@@ -98,6 +98,8 @@ impl FileOutHandler {
 
         log::info!("Writing scan results to {}", self.config.output);
 
+        write_to(&*self.config, &mut file, self.config.json)?;
+
         while let Some(command) = self.receiver.recv().await {
             match command {
                 Command::Report(response) => {
@@ -209,8 +211,12 @@ impl TermOutHandler {
         while let Some(command) = self.receiver.recv().await {
             match command {
                 Command::Report(resp) => {
-                    self.process_response(tx_stats.clone(), resp, ProcessResponseCall::Recursive)
-                        .await?;
+                    if let Err(err) = self
+                        .process_response(tx_stats.clone(), resp, ProcessResponseCall::Recursive)
+                        .await
+                    {
+                        log::warn!("{}", err);
+                    }
                 }
                 Command::Sync(sender) => {
                     sender.send(true).unwrap_or_default();
@@ -242,14 +248,6 @@ impl TermOutHandler {
         log::trace!("enter: process_response({:?}, {:?})", resp, call_type);
 
         async move {
-            let should_filter = self
-                .handles
-                .as_ref()
-                .unwrap()
-                .filters
-                .data
-                .should_filter_response(&resp, self.handles.as_ref().unwrap().stats.tx.clone());
-
             let contains_sentry = if !self.config.filter_status.is_empty() {
                 // -C was used, meaning -s was not and we should ignore the defaults
                 // https://github.com/epi052/feroxbuster/issues/535
@@ -261,7 +259,7 @@ impl TermOutHandler {
             };
 
             let unknown_sentry = !RESPONSES.contains(&resp); // !contains == unknown
-            let should_process_response = contains_sentry && unknown_sentry && !should_filter;
+            let should_process_response = contains_sentry && unknown_sentry;
 
             if should_process_response {
                 // print to stdout
@@ -274,7 +272,7 @@ impl TermOutHandler {
                     self.tx_file
                         .send(Command::Report(resp.clone()))
                         .with_context(|| {
-                            fmt_err(&format!("Could not send {} to file handler", resp))
+                            fmt_err(&format!("Could not send {resp} to file handler"))
                         })?;
                 }
             }
@@ -336,6 +334,21 @@ impl TermOutHandler {
                     )
                     .await;
 
+                    let Some(handles) = self.handles.as_ref() else {
+                        // shouldn't ever happen, but we'll log and return early if it does
+                        log::error!("handles were unexpectedly None, this shouldn't happen");
+                        return Ok(());
+                    };
+
+                    if handles
+                        .filters
+                        .data
+                        .should_filter_response(&ferox_response, tx_stats.clone())
+                    {
+                        // response was filtered for one reason or another, don't process it
+                        continue;
+                    }
+
                     self.process_response(
                         tx_stats.clone(),
                         Box::new(ferox_response),
@@ -393,12 +406,12 @@ impl TermOutHandler {
 
         if !filename.is_empty() {
             // append rules
-            for suffix in ["~", ".bak", ".bak2", ".old", ".1"] {
-                self.add_new_url_to_vec(url, &format!("{}{}", filename, suffix), &mut urls);
+            for suffix in &self.config.backup_extensions {
+                self.add_new_url_to_vec(url, &format!("{filename}{suffix}"), &mut urls);
             }
 
             // vim swap rule
-            self.add_new_url_to_vec(url, &format!(".{}.swp", filename), &mut urls);
+            self.add_new_url_to_vec(url, &format!(".{filename}.swp"), &mut urls);
 
             // replace original extension rule
             let parts: Vec<_> = filename
@@ -432,7 +445,7 @@ mod tests {
             config,
             receiver: rx,
         };
-        println!("{:?}", foh);
+        println!("{foh:?}");
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
@@ -451,7 +464,7 @@ mod tests {
             handles: Some(handles),
         };
 
-        println!("{:?}", toh);
+        println!("{toh:?}");
         tx.send(Command::Exit).unwrap();
     }
 

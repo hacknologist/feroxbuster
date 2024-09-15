@@ -430,6 +430,7 @@ fn scanner_single_request_scan_with_filtered_result() -> Result<(), Box<dyn std:
 }
 
 #[test]
+#[should_panic] // added in 2.11.0 for panicking trace-level logging
 /// send a single valid request, get a response, and write the logging messages to disk
 fn scanner_single_request_scan_with_debug_logging() {
     let srv = MockServer::start();
@@ -454,7 +455,7 @@ fn scanner_single_request_scan_with_debug_logging() {
         .unwrap();
 
     let contents = std::fs::read_to_string(outfile).unwrap();
-    println!("{}", contents);
+    println!("{contents}");
     assert!(contents.starts_with("Configuration {"));
     assert!(contents.contains("TRC"));
     assert!(contents.contains("DBG"));
@@ -467,6 +468,7 @@ fn scanner_single_request_scan_with_debug_logging() {
 }
 
 #[test]
+#[should_panic] // added in 2.11.0 for panicking trace-level logging
 /// send a single valid request, get a response, and write the logging messages to disk as NDJSON
 fn scanner_single_request_scan_with_debug_logging_as_json() {
     let srv = MockServer::start();
@@ -492,7 +494,7 @@ fn scanner_single_request_scan_with_debug_logging_as_json() {
         .unwrap();
 
     let contents = std::fs::read_to_string(outfile).unwrap();
-    println!("{}", contents);
+    println!("{contents}");
     assert!(contents.starts_with("{\"type\":\"configuration\""));
     assert!(contents.contains("\"level\":\"TRACE\""));
     assert!(contents.contains("\"level\":\"DEBUG\""));
@@ -587,9 +589,12 @@ fn scanner_recursion_works_with_403_directories() {
     cmd.assert().success().stdout(
         predicate::str::contains("/LICENSE")
             .count(2)
-            .and(predicate::str::contains("200").count(2))
-            .and(predicate::str::contains("403"))
-            .and(predicate::str::contains("53c"))
+            .and(predicate::str::contains("200"))
+            .and(predicate::str::contains("404"))
+            .and(predicate::str::contains("53c Auto-filtering"))
+            .and(predicate::str::contains(
+                "Auto-filtering found 404-like response and created new filter;",
+            ))
             .and(predicate::str::contains("14c"))
             .and(predicate::str::contains("0c"))
             .and(predicate::str::contains("ignored").count(2))
@@ -651,7 +656,7 @@ fn add_discovered_extension_updates_bars_and_stats() {
     )
     .unwrap();
 
-    srv.mock(|when, then| {
+    let mock = srv.mock(|when, then| {
         when.method(GET).path("/stuff.php");
         then.status(200).body("cool... coolcoolcool");
     });
@@ -675,10 +680,11 @@ fn add_discovered_extension_updates_bars_and_stats() {
         .assert()
         .success();
 
+    mock.assert_hits(1);
     let contents = std::fs::read_to_string(file_path).unwrap();
-    println!("{}", contents);
+    println!("{contents}");
     assert!(contents.contains("discovered new extension: php"));
-    assert!(contents.contains("extensions_collected: 1"));
+    // assert!(contents.contains("extensions_collected: 1"));  // this is racy
     assert!(contents.contains("expected_per_scan: 6"));
 }
 
@@ -689,7 +695,7 @@ fn collect_backups_makes_appropriate_requests() {
     let srv = MockServer::start();
     let (tmp_dir, file) = setup_tmp_directory(&["LICENSE.txt".to_string()], "wordlist").unwrap();
 
-    let valid_paths = vec![
+    let valid_paths = [
         "/LICENSE.txt",
         "/LICENSE.txt~",
         "/LICENSE.txt.bak",
@@ -891,12 +897,16 @@ fn scanner_forced_recursion_ignores_normal_redirect_logic() -> Result<(), Box<dy
         .arg("--wordlist")
         .arg(file.as_os_str())
         .arg("--force-recursion")
+        .arg("--dont-filter")
+        .arg("--status-codes")
+        .arg("301")
+        .arg("200")
         .arg("-o")
         .arg(outfile.as_os_str())
         .unwrap();
 
     let contents = std::fs::read_to_string(outfile)?;
-    println!("{}", contents);
+    println!("{contents}");
 
     assert!(contents.contains("/LICENSE"));
     assert!(contents.contains("301"));

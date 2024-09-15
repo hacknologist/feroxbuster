@@ -45,10 +45,14 @@ fn setup_config_test() -> Configuration {
             add_slash = true
             stdin = true
             dont_filter = true
-            extract_links = true
+            extract_links = false
             json = true
             save_state = false
             depth = 1
+            limit_bars = 3
+            protocol = "http"
+            request_file = "/some/request/file"
+            scan_dir_listings = true
             force_recursion = true
             filter_size = [4120]
             filter_regex = ["^ignore me$"]
@@ -56,6 +60,10 @@ fn setup_config_test() -> Configuration {
             filter_word_count = [994, 992]
             filter_line_count = [34]
             filter_status = [201]
+            server_certs = ["/some/cert.pem", "/some/other/cert.pem"]
+            client_cert = "/some/client/cert.pem"
+            client_key = "/some/client/key.pem"
+            backup_extensions = [".save"]
         "#;
     let tmp_dir = TempDir::new().unwrap();
     let file = tmp_dir.path().join(DEFAULT_CONFIG_NAME);
@@ -83,6 +91,7 @@ fn default_configuration() {
     assert_eq!(config.timeout, timeout());
     assert_eq!(config.verbosity, 0);
     assert_eq!(config.scan_limit, 0);
+    assert_eq!(config.limit_bars, 0);
     assert!(!config.silent);
     assert!(!config.quiet);
     assert_eq!(config.output_level, OutputLevel::Default);
@@ -98,11 +107,12 @@ fn default_configuration() {
     assert!(!config.add_slash);
     assert!(!config.force_recursion);
     assert!(!config.redirects);
-    assert!(!config.extract_links);
+    assert!(config.extract_links);
     assert!(!config.insecure);
     assert!(!config.collect_extensions);
     assert!(!config.collect_backups);
     assert!(!config.collect_words);
+    assert!(!config.scan_dir_listings);
     assert!(config.regex_denylist.is_empty());
     assert_eq!(config.queries, Vec::new());
     assert_eq!(config.filter_size, Vec::<u64>::new());
@@ -117,6 +127,12 @@ fn default_configuration() {
     assert_eq!(config.filter_line_count, Vec::<usize>::new());
     assert_eq!(config.filter_status, Vec::<u16>::new());
     assert_eq!(config.headers, HashMap::new());
+    assert_eq!(config.server_certs, Vec::<String>::new());
+    assert_eq!(config.client_cert, String::new());
+    assert_eq!(config.client_key, String::new());
+    assert_eq!(config.backup_extensions, backup_extensions());
+    assert_eq!(config.protocol, request_protocol());
+    assert_eq!(config.request_file, String::new());
 }
 
 #[test]
@@ -254,6 +270,13 @@ fn config_reads_verbosity() {
 
 #[test]
 /// parse the test config and see that the value parsed is correct
+fn config_reads_limit_bars() {
+    let config = setup_config_test();
+    assert_eq!(config.limit_bars, 3);
+}
+
+#[test]
+/// parse the test config and see that the value parsed is correct
 fn config_reads_output() {
     let config = setup_config_test();
     assert_eq!(config.output, "/some/otherpath");
@@ -305,7 +328,7 @@ fn config_reads_add_slash() {
 /// parse the test config and see that the value parsed is correct
 fn config_reads_extract_links() {
     let config = setup_config_test();
-    assert!(config.extract_links);
+    assert!(!config.extract_links);
 }
 
 #[test]
@@ -438,9 +461,61 @@ fn config_reads_time_limit() {
 
 #[test]
 /// parse the test config and see that the value parsed is correct
+fn config_reads_scan_dir_listings() {
+    let config = setup_config_test();
+    assert!(config.scan_dir_listings);
+}
+
+#[test]
+/// parse the test config and see that the value parsed is correct
+fn config_reads_protocol() {
+    let config = setup_config_test();
+    assert_eq!(config.protocol, "http");
+}
+
+#[test]
+/// parse the test config and see that the value parsed is correct
+fn config_reads_request_file() {
+    let config = setup_config_test();
+    assert_eq!(config.request_file, String::new());
+}
+
+#[test]
+/// parse the test config and see that the value parsed is correct
 fn config_reads_resume_from() {
     let config = setup_config_test();
     assert_eq!(config.resume_from, "/some/state/file");
+}
+
+#[test]
+/// parse the test config and see that the value parsed is correct
+fn config_reads_server_certs() {
+    let config = setup_config_test();
+    assert_eq!(
+        config.server_certs,
+        ["/some/cert.pem", "/some/other/cert.pem"]
+    );
+}
+
+#[test]
+/// parse the test config and see that the value parsed is correct
+fn config_reads_backup_extensions() {
+    let config = setup_config_test();
+    assert_eq!(config.backup_extensions, [".save"]);
+}
+
+#[test]
+/// parse the test config and see that the value parsed is correct
+fn config_reads_client_cert() {
+    let config = setup_config_test();
+    assert_eq!(config.client_cert, "/some/client/cert.pem");
+}
+
+#[test]
+/// parse the test config and see that the value parsed is correct
+fn config_reads_client_key() {
+    let config = setup_config_test();
+    assert_eq!(config.client_key, "/some/client/key.pem");
 }
 
 #[test]
@@ -482,7 +557,7 @@ fn config_report_and_exit_works() {
 fn as_str_returns_string_with_newline() {
     let config = Configuration::new().unwrap();
     let config_str = config.as_str();
-    println!("{}", config_str);
+    println!("{config_str}");
     assert!(config_str.starts_with("Configuration {"));
     assert!(config_str.ends_with("}\n"));
     assert!(config_str.contains("replay_codes:"));

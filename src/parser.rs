@@ -40,12 +40,12 @@ pub fn initialize() -> Command {
             Arg::new("url")
                 .short('u')
                 .long("url")
-                .required_unless_present_any(["stdin", "resume_from"])
+                .required_unless_present_any(["stdin", "resume_from", "update_app", "request_file"])
                 .help_heading("Target selection")
                 .value_name("URL")
                 .use_value_delimiter(true)
                 .value_hint(ValueHint::Url)
-                .help("The target URL (required, unless [--stdin || --resume-from] used)"),
+                .help("The target URL (required, unless [--stdin || --resume-from || --request-file] used)"),
         )
         .arg(
             Arg::new("stdin")
@@ -64,6 +64,15 @@ pub fn initialize() -> Command {
                 .help("State file from which to resume a partially complete scan (ex. --resume-from ferox-1606586780.state)")
                 .conflicts_with("url")
                 .num_args(1),
+        ).arg(
+            Arg::new("request_file")
+                .long("request-file")
+                .help_heading("Target selection")
+                .value_hint(ValueHint::FilePath)
+                .conflicts_with("url")
+                .num_args(1)
+                .value_name("REQUEST_FILE")
+                .help("Raw HTTP request file to use as a template for all requests"),
         );
 
     /////////////////////////////////////////////////////////////////////
@@ -91,13 +100,16 @@ pub fn initialize() -> Command {
                 .long("smart")
                 .num_args(0)
                 .help_heading("Composite settings")
-                .help("Set --extract-links, --auto-tune, --collect-words, and --collect-backups to true"),
-        ).arg(
+                .conflicts_with_all(["rate_limit", "auto_bail"])
+                .help("Set --auto-tune, --collect-words, and --collect-backups to true"),
+        )
+        .arg(
             Arg::new("thorough")
                 .long("thorough")
                 .num_args(0)
                 .help_heading("Composite settings")
-                .help("Use the same settings as --smart and set --collect-extensions to true"),
+                .conflicts_with_all(["rate_limit", "auto_bail"])
+                .help("Use the same settings as --smart and set --collect-extensions and --scan-dir-listings to true"),
         );
 
     /////////////////////////////////////////////////////////////////////
@@ -174,7 +186,7 @@ pub fn initialize() -> Command {
                 .use_value_delimiter(true)
                 .help_heading("Request settings")
                 .help(
-                    "File extension(s) to search for (ex: -x php -x pdf js)",
+                    "File extension(s) to search for (ex: -x php -x pdf js); reads values (newline-separated) from file if input starts with an @ (ex: @ext.txt)",
                 ),
         )
         .arg(
@@ -208,7 +220,6 @@ pub fn initialize() -> Command {
                 .num_args(1..)
                 .action(ArgAction::Append)
                 .help_heading("Request settings")
-                .use_value_delimiter(true)
                 .help(
                     "Specify HTTP headers to be used in each request (ex: -H Header:val -H 'stuff: things')",
                 ),
@@ -246,6 +257,13 @@ pub fn initialize() -> Command {
                 .help_heading("Request settings")
                 .num_args(0)
                 .help("Append / to each request's URL")
+        ).arg(
+            Arg::new("protocol")
+                .long("protocol")
+                .value_name("PROTOCOL")
+                .num_args(1)
+                .help_heading("Request settings")
+                .help("Specify the protocol to use when targeting via --request-file or --url with domain only (default: https)"),
         );
 
     /////////////////////////////////////////////////////////////////////
@@ -289,7 +307,7 @@ pub fn initialize() -> Command {
                 .use_value_delimiter(true)
                 .help_heading("Response filters")
                 .help(
-                    "Filter out messages via regular expression matching on the response's body (ex: -X '^ignore me$')",
+                    "Filter out messages via regular expression matching on the response's body/headers (ex: -X '^ignore me$')",
                 ),
         )
         .arg(
@@ -355,7 +373,7 @@ pub fn initialize() -> Command {
                 .use_value_delimiter(true)
                 .help_heading("Response filters")
                 .help(
-                    "Status Codes to include (allow list) (default: 200 204 301 302 307 308 401 403 405)",
+                    "Status Codes to include (allow list) (default: All Status Codes)",
                 ),
         );
 
@@ -387,6 +405,35 @@ pub fn initialize() -> Command {
                 .num_args(0)
                 .help_heading("Client settings")
                 .help("Disables TLS certificate validation in the client"),
+        )
+        .arg(
+            Arg::new("server_certs")
+                .long("server-certs")
+                .value_name("PEM|DER")
+                .value_hint(ValueHint::FilePath)
+                .num_args(1..)
+                .help_heading("Client settings")
+                .help("Add custom root certificate(s) for servers with unknown certificates"),
+        )
+        .arg(
+            Arg::new("client_cert")
+                .long("client-cert")
+                .value_name("PEM")
+                .value_hint(ValueHint::FilePath)
+                .num_args(1)
+                .requires("client_key")
+                .help_heading("Client settings")
+                .help("Add a PEM encoded certificate for mutual authentication (mTLS)"),
+        )
+        .arg(
+            Arg::new("client_key")
+                .long("client-key")
+                .value_name("PEM")
+                .value_hint(ValueHint::FilePath)
+                .num_args(1)
+                .requires("client_cert")
+                .help_heading("Client settings")
+                .help("Add a PEM encoded private key for mutual authentication (mTLS)"),
         );
 
     /////////////////////////////////////////////////////////////////////
@@ -431,7 +478,15 @@ pub fn initialize() -> Command {
                 .long("extract-links")
                 .num_args(0)
                 .help_heading("Scan settings")
-                .help("Extract links from response body (html, javascript, etc...); make new requests based on findings")
+                .hide(true)
+                .help("Extract links from response body (html, javascript, etc...); make new requests based on findings (default: true)")
+        )
+        .arg(
+            Arg::new("dont_extract_links")
+                .long("dont-extract-links")
+                .num_args(0)
+                .help_heading("Scan settings")
+                .help("Don't extract links from response body (html, javascript, etc...)")
         )
         .arg(
             Arg::new("scan_limit")
@@ -446,6 +501,8 @@ pub fn initialize() -> Command {
             Arg::new("parallel")
                 .long("parallel")
                 .value_name("PARALLEL_SCANS")
+                .conflicts_with("verbosity")
+                .conflicts_with("url")
                 .num_args(1)
                 .requires("stdin")
                 .help_heading("Scan settings")
@@ -475,7 +532,7 @@ pub fn initialize() -> Command {
                 .long("wordlist")
                 .value_hint(ValueHint::FilePath)
                 .value_name("FILE")
-                .help("Path to the wordlist")
+                .help("Path or URL of the wordlist")
                 .help_heading("Scan settings")
                 .num_args(1),
         ).arg(
@@ -510,10 +567,11 @@ pub fn initialize() -> Command {
             Arg::new("collect_backups")
                 .short('B')
                 .long("collect-backups")
-                .num_args(0)
+                .num_args(0..)
                 .help_heading("Dynamic collection settings")
-                .help("Automatically request likely backup extensions for \"found\" urls")
-        ).arg(
+                .help("Automatically request likely backup extensions for \"found\" urls (default: ~, .bak, .bak2, .old, .1)")
+        )
+        .arg(
             Arg::new("collect_words")
                 .short('g')
                 .long("collect-words")
@@ -532,6 +590,12 @@ pub fn initialize() -> Command {
                 .help(
                     "File extension(s) to Ignore while collecting extensions (only used with --collect-extensions)",
                 ),
+        ).arg(
+            Arg::new("scan_dir_listings")
+                .long("scan-dir-listings")
+                .num_args(0)
+                .help_heading("Scan settings")
+                .help("Force scans to recurse into directory listings")
         );
 
     /////////////////////////////////////////////////////////////////////
@@ -553,7 +617,7 @@ pub fn initialize() -> Command {
                 .num_args(0)
                 .conflicts_with("quiet")
                 .help_heading("Output settings")
-                .help("Only print URLs + turn off logging (good for piping a list of urls to other commands)")
+                .help("Only print URLs (or JSON w/ --json) + turn off logging (good for piping a list of urls to other commands)")
         )
         .arg(
             Arg::new("quiet")
@@ -596,6 +660,13 @@ pub fn initialize() -> Command {
                 .num_args(0)
                 .help_heading("Output settings")
                 .help("Disable state output file (*.state)")
+        ).arg(
+            Arg::new("limit_bars")
+                .long("limit-bars")
+                .value_name("NUM_BARS_TO_SHOW")
+                .num_args(1)
+                .help_heading("Output settings")
+                .help("Number of directory scan bars to show at any given time (default: no limit)"),
         );
 
     /////////////////////////////////////////////////////////////////////
@@ -604,8 +675,22 @@ pub fn initialize() -> Command {
     let mut app = app
         .group(
             ArgGroup::new("output_files")
-                .args(["debug_log", "output"])
+                .args(["debug_log", "output", "silent"])
                 .multiple(true),
+        )
+        .group(
+            ArgGroup::new("output_limiters")
+                .args(["quiet", "silent"])
+                .multiple(false),
+        )
+        .arg(
+            Arg::new("update_app")
+                .short('U')
+                .long("update")
+                .exclusive(true)
+                .num_args(0)
+                .help_heading("Update settings")
+                .help("Update feroxbuster to the latest version"),
         )
         .after_long_help(EPILOGUE);
 
@@ -637,8 +722,7 @@ fn valid_time_spec(time_spec: &str) -> Result<String, String> {
         true => Ok(time_spec.to_string()),
         false => {
             let msg = format!(
-                "Expected a non-negative, whole number followed by s, m, h, or d (case insensitive); received {}",
-                time_spec
+                "Expected a non-negative, whole number followed by s, m, h, or d (case insensitive); received {time_spec}"
             );
             Err(msg)
         }
@@ -673,9 +757,6 @@ EXAMPLES:
 
     Pass auth token via query parameter
         ./feroxbuster -u http://127.1 --query token=0123456789ABCDEF
-
-    Find links in javascript/html and make additional requests based on results
-        ./feroxbuster -u http://127.1 --extract-links
 
     Ludicrous speed... go!
         ./feroxbuster -u http://127.1 --threads 200

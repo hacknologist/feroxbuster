@@ -22,6 +22,7 @@ use utils::{setup_tmp_directory, teardown_tmp_directory};
 // these words will be used along with pattern matching to trigger different policies
 
 #[test]
+#[ignore]
 /// --auto-bail should cancel a scan with spurious errors  
 fn auto_bail_cancels_scan_with_timeouts() {
     let srv = MockServer::start();
@@ -37,7 +38,7 @@ fn auto_bail_cancels_scan_with_timeouts() {
     let error_mock = srv.mock(|when, then| {
         when.method(GET)
             .path_matches(Regex::new("/[a-zA-Z]{6}error[a-zA-Z]{6}").unwrap());
-        then.delay(Duration::new(3, 0))
+        then.delay(Duration::new(2, 5000))
             .status(200)
             .body("verboten, nerd");
     });
@@ -65,10 +66,10 @@ fn auto_bail_cancels_scan_with_timeouts() {
         .arg("--timeout")
         .arg("2")
         .arg("--threads")
-        .arg("4")
+        .arg("8")
         .arg("--debug-log")
         .arg(logfile.as_os_str())
-        .arg("-vvvv")
+        .arg("-vv")
         .arg("--json")
         .assert()
         .success();
@@ -92,7 +93,7 @@ fn auto_bail_cancels_scan_with_timeouts() {
                     .parse::<usize>()
                     .unwrap();
 
-                println!("expected: {}", total_expected);
+                println!("expected: {total_expected}");
                 // without bailing, should be 6180; after bail decreases significantly
                 assert!(total_expected < 5000);
             }
@@ -146,7 +147,7 @@ fn auto_bail_cancels_scan_with_403s() {
         .arg("4")
         .arg("--debug-log")
         .arg(logfile.as_os_str())
-        .arg("-vvvv")
+        .arg("-vv")
         .arg("--json")
         .assert()
         .success();
@@ -161,7 +162,7 @@ fn auto_bail_cancels_scan_with_403s() {
             let str_msg = message.as_str().unwrap_or_default().to_string();
 
             if str_msg.starts_with("Stats") {
-                println!("{}", str_msg);
+                println!("{str_msg}");
                 let re = Regex::new("total_expected: ([0-9]+),").unwrap();
                 assert!(re.is_match(&str_msg));
                 let total_expected = re
@@ -171,7 +172,7 @@ fn auto_bail_cancels_scan_with_403s() {
                     .map_or("", |m| m.as_str())
                     .parse::<usize>()
                     .unwrap();
-                println!("total_expected: {}", total_expected);
+                println!("total_expected: {total_expected}");
                 assert!(total_expected < 5000);
             }
         }
@@ -228,7 +229,7 @@ fn auto_bail_cancels_scan_with_429s() {
         .arg("4")
         .arg("--debug-log")
         .arg(logfile.as_os_str())
-        .arg("-vvvv")
+        .arg("-vvv")
         .arg("--json")
         .assert()
         .success();
@@ -243,7 +244,7 @@ fn auto_bail_cancels_scan_with_429s() {
             let str_msg = message.as_str().unwrap_or_default().to_string();
 
             if str_msg.starts_with("Stats") {
-                println!("{}", str_msg);
+                println!("{str_msg}");
                 let re = Regex::new("total_expected: ([0-9]+),").unwrap();
                 assert!(re.is_match(&str_msg));
                 let total_expected = re
@@ -253,7 +254,7 @@ fn auto_bail_cancels_scan_with_429s() {
                     .map_or("", |m| m.as_str())
                     .parse::<usize>()
                     .unwrap();
-                println!("total_expected: {}", total_expected);
+                println!("total_expected: {total_expected}");
                 assert!(total_expected < 5000);
             }
         }

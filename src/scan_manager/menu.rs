@@ -1,8 +1,10 @@
+use std::time::Duration;
+
 use crate::filters::filter_lookup;
 use crate::progress::PROGRESS_BAR;
 use crate::traits::FeroxFilter;
 use console::{measure_text_width, pad_str, style, Alignment, Term};
-use indicatif::ProgressDrawTarget;
+use indicatif::{HumanDuration, ProgressDrawTarget};
 use regex::Regex;
 
 /// Data container for a command entered by the user interactively
@@ -42,6 +44,9 @@ pub(super) struct Menu {
 
     /// footer: instructions surrounded by separators
     footer: String,
+
+    /// length of longest displayed line (suitable for ascii/unicode)
+    longest: usize,
 
     /// unicode line border, matched to longest displayed line
     border: String,
@@ -110,19 +115,20 @@ impl Menu {
         commands.push_str(&valid_filters);
         commands.push_str(&rm_filter_cmd);
 
-        let longest = measure_text_width(&canx_cmd).max(measure_text_width(&name));
+        let longest = measure_text_width(&canx_cmd).max(measure_text_width(&name)) + 1;
 
         let border = separator.repeat(longest);
 
         let padded_name = pad_str(&name, longest, Alignment::Center, None);
 
-        let header = format!("{}\n{}\n{}", border, padded_name, border);
-        let footer = format!("{}\n{}", commands, border);
+        let header = format!("{border}\n{padded_name}\n{border}");
+        let footer = format!("{commands}\n{border}");
 
         Self {
             header,
             footer,
             border,
+            longest,
             term: Term::stderr(),
         }
     }
@@ -140,6 +146,13 @@ impl Menu {
     /// print menu footer
     pub(super) fn print_footer(&self) {
         self.println(&self.footer);
+    }
+
+    /// print menu footer
+    pub(super) fn print_eta(&self, eta: Duration) {
+        let inner = format!("⏳ {} remaining ⏳", HumanDuration(eta));
+        let padded_eta = pad_str(&inner, self.longest, Alignment::Center, None);
+        self.println(&format!("{padded_eta}\n{}", self.border));
     }
 
     /// set PROGRESS_BAR bar target to hidden
@@ -174,7 +187,7 @@ impl Menu {
             .to_string()
             .parse::<usize>()
             .unwrap_or_else(|e| {
-                self.println(&format!("Found non-numeric input: {}: {:?}", e, value));
+                self.println(&format!("Found non-numeric input: {e}: {value:?}"));
                 0
             })
     }
@@ -198,7 +211,7 @@ impl Menu {
 
                 if range.len() != 2 {
                     // expecting [1, 4] or similar, if a 0 was used, we'd be left with a vec of size 1
-                    self.println(&format!("Found invalid range of scans: {}", value));
+                    self.println(&format!("Found invalid range of scans: {value}"));
                     continue;
                 }
 
@@ -210,10 +223,14 @@ impl Menu {
                     }
                 });
             } else {
+                if value.is_empty() {
+                    continue;
+                }
+
                 let value = self.str_to_usize(value);
 
-                if value != 0 && !nums.contains(&value) {
-                    // the zeroth scan is always skipped, skip already known values
+                if !nums.contains(&value) {
+                    // skip already known values
                     nums.push(value);
                 }
             }
@@ -290,8 +307,7 @@ impl Menu {
     /// Given a url, confirm with user that we should cancel
     pub(super) fn confirm_cancellation(&self, url: &str) -> char {
         self.println(&format!(
-            "You sure you wanna cancel this scan: {}? [Y/n]",
-            url
+            "You sure you wanna cancel this scan: {url}? [Y/n]"
         ));
 
         self.term.read_char().unwrap_or('n')
